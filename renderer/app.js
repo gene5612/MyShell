@@ -246,14 +246,13 @@ function makeTreeRow(node, depth) {
     `<span class="f-size">${node.isDir ? '' : humanBytes(node.size)}</span>`;
 
   el.addEventListener('click', async () => {
+    // 无论文件还是目录，单击都选中高亮
+    fileTree.selected = node;
     if (node.isDir) {
       node.expanded = !node.expanded;
       if (node.expanded) await ensureChildren(node);
-      renderTree();
-    } else {
-      fileTree.selected = node;
-      renderTree();
     }
+    renderTree();
   });
 
   // 右键菜单: 选中并弹出下载
@@ -313,6 +312,7 @@ function showFileMenu(e, node) {
   fileMenuNode = node;
   const menu = $('#file-ctx-menu');
   menu.querySelector('[data-act="download"]').classList.toggle('disabled', node.isDir);
+  menu.querySelector('[data-act="downloadDir"]').classList.toggle('disabled', !node.isDir);
   menu.classList.remove('hidden');
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
   menu.style.left = Math.min(e.clientX, window.innerWidth - mw - 4) + 'px';
@@ -330,6 +330,7 @@ function initFileMenu() {
     hideFileMenu();
     if (!item || item.classList.contains('disabled') || !fileMenuNode) return;
     if (item.dataset.act === 'download') downloadNode(fileMenuNode);
+    else if (item.dataset.act === 'downloadDir') downloadDirNode(fileMenuNode);
   });
   window.addEventListener('mousedown', (e) => {
     if (!menu.contains(e.target)) hideFileMenu();
@@ -402,6 +403,37 @@ async function downloadNode(node) {
   }
 }
 
+// 递归下载远程目录, 保持远程目录结构
+async function downloadDirNode(node) {
+  const tab = activeSshTab();
+  if (!tab || !node || !node.isDir) {
+    showToast('请先选择一个目录');
+    return;
+  }
+  let local;
+  try {
+    local = await window.api.chooseDownloadDir(''); // 只选存放位置
+  } catch (err) {
+    showToast('选择保存目录失败: ' + err.message);
+    return;
+  }
+  if (!local) return;
+  // 自动在所选位置下创建与远程目录同名的本地目录
+  const dirName = (basename(node.path) || 'root').replace(/[\\/:*?"<>|]+/g, '_');
+  const target = local + '\\' + dirName;
+  showToast('开始下载目录: ' + node.name);
+  try {
+    const res = await window.api.fsDownloadDir(tab.id, node.path, target);
+    if (res.failed && res.failed.length) {
+      showToast(`下载完成 ${res.done}/${res.total}，失败 ${res.failed.length} 个: ${res.failed[0]}`);
+    } else {
+      showToast(`目录下载完成: ${res.total} 个文件 → ${target}`);
+    }
+  } catch (err) {
+    showToast('目录下载失败: ' + err.message);
+  }
+}
+
 // ------------------------------------------------- 轻提示
 let toastTimer = null;
 function showToast(msg) {
@@ -458,6 +490,68 @@ function initCtxMenu() {
     if (!menu.contains(e.target)) hideCtxMenu();
   });
   window.addEventListener('blur', hideCtxMenu);
+}
+
+// ------------------------------------------------- 标签页右键菜单
+function showTabMenu(e, tab) {
+  const menu = $('#tab-ctx-menu');
+  const disconnectedCount = tabs.filter((t) => t.status === 'disconnected').length;
+  const isDisc = tab.status === 'disconnected';
+  // 「连接」仅对断开的标签有意义；「连接全部」仅存在断开标签时显示
+  menu.querySelector('[data-act="reconnect"]').classList.toggle('hidden', !isDisc);
+  menu.querySelector('[data-act="reconnectAll"]').classList.toggle('hidden', disconnectedCount === 0);
+  menu.classList.remove('hidden');
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  menu.style.left = Math.min(e.clientX, window.innerWidth - mw - 4) + 'px';
+  menu.style.top = Math.min(e.clientY, window.innerHeight - mh - 4) + 'px';
+  menu.dataset.tabId = tab.id;
+}
+
+function hideTabMenu() {
+  $('#tab-ctx-menu').classList.add('hidden');
+}
+
+function reconnectTab(tab) {
+  if (!tab || tab.status !== 'disconnected') return;
+  tab.ready = false;
+  if (tab.logging) {
+    window.api.stopLog(tab.id).then(() => { tab.logging = false; });
+  }
+  tab.term.writeln('\r\n\x1b[33m[正在重新连接...]\x1b[0m');
+  startBackend(tab);
+}
+
+function duplicateTab(tab) {
+  if (!tab) return;
+  // 打开一个相同配置的新标签页（新连接，不继承旧终端内容与状态）
+  createTab({ ...tab.session }, tab.type);
+}
+
+function initTabMenu() {
+  const menu = $('#tab-ctx-menu');
+  menu.addEventListener('click', (e) => {
+    const item = e.target.closest('.ctx-item');
+    const tab = tabs.find((t) => t.id === menu.dataset.tabId);
+    hideTabMenu();
+    if (!item || !tab) return;
+    const act = item.dataset.act;
+    if (act === 'reconnect') {
+      reconnectTab(tab);
+    } else if (act === 'reconnectAll') {
+      const targets = tabs.filter((t) => t.status === 'disconnected');
+      if (!targets.length) return;
+      targets.forEach(reconnectTab);
+      showToast(`正在重连 ${targets.length} 个断开的终端`);
+    } else if (act === 'duplicate') {
+      duplicateTab(tab);
+    } else if (act === 'closeTab') {
+      closeTab(tab.id);
+    }
+  });
+  window.addEventListener('mousedown', (e) => {
+    if (!menu.contains(e.target)) hideTabMenu();
+  });
+  window.addEventListener('blur', hideTabMenu);
 }
 
 // ------------------------------------------------- 标签页与终端
@@ -668,6 +762,12 @@ function renderTabbar() {
       if (dragTabId && dragTabId !== t.id) reorderTabs(dragTabId, t.id);
     });
     el.addEventListener('dragend', () => { dragTabId = null; });
+    // 右键标签页菜单: 重连 / 连接全部 / 复制标签
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showTabMenu(e, t);
+    });
     tabbar.appendChild(el);
   });
   if ($('#batch-count') && $('#batch-send')) updateBatchCount();
@@ -1562,6 +1662,7 @@ async function init() {
   initSidebarTabs();
   bindFileBrowser();
   initFileMenu();
+  initTabMenu();
   renderQuickCommands();
   await loadSessions();
   bindEvents();

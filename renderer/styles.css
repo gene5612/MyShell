@@ -422,7 +422,7 @@ select {
 #toast.hidden { display: none; }
 
 /* ---------- 右键菜单 ---------- */
-#ctx-menu, #file-ctx-menu {
+#ctx-menu, #file-ctx-menu, #tab-ctx-menu {
   position: fixed;
   z-index: 200;
   background: var(--bg-panel);
@@ -432,7 +432,7 @@ select {
   min-width: 120px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
-#ctx-menu.hidden, #file-ctx-menu.hidden { display: none; }
+#ctx-menu.hidden, #file-ctx-menu.hidden, #tab-ctx-menu.hidden { display: none; }
 .ctx-item { padding: 6px 16px; cursor: pointer; font-size: 13px; }
 .ctx-item:hover { background: var(--bg-raised); color: var(--accent); }
 .ctx-item.disabled { color: var(--fg-dim); opacity: 0.5; pointer-events: none; }

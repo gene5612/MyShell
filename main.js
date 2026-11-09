@@ -629,6 +629,65 @@ ipcMain.handle('fs:download', async (e, id, remotePath, localPath) => {
   }
 });
 
+// 选择本地目录（用于整个目录下载）
+ipcMain.handle('dir:choose', async (e, defaultName) => {
+  const res = await dialog.showOpenDialog(win, {
+    title: '选择保存目录',
+    defaultPath: path.join(app.getPath('downloads'), defaultName || ''),
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (res.canceled || !res.filePaths.length) return null;
+  return res.filePaths[0];
+});
+
+// 递归下载远程目录: 远程目录结构映射到本地 localDir 下
+async function downloadDirRec(id, sftp, remoteDir, localDir, counter) {
+  await fs.promises.mkdir(localDir, { recursive: true });
+  const entries = await new Promise((resolve, reject) => {
+    sftp.readdir(remoteDir, (err, list) => (err ? reject(err) : resolve(list)));
+  });
+  for (const f of entries) {
+    const rp = path.posix.join(remoteDir, f.filename);
+    const lp = path.join(localDir, f.filename);
+    if (f.attrs.isDirectory()) {
+      await downloadDirRec(id, sftp, rp, lp, counter);
+    } else if (f.attrs.isFile()) {
+      try {
+        await sftpTransfer(id, sftp, 'fastGet', rp, lp);
+        counter.done++;
+        counter.bytes += f.attrs.size || 0;
+        emit('fs:progress', id, { file: rp, pct: -1, done: counter.done, total: counter.total });
+      } catch (err) {
+        counter.failed.push(rp + ' (' + err.message + ')');
+      }
+    }
+  }
+}
+
+ipcMain.handle('fs:downloadDir', async (e, id, remoteDir, localDir) => {
+  try {
+    const sftp = await getSftp(id);
+    // 先统计文件总数（用于进度提示）
+    let total = 0;
+    const countFiles = async (dir) => {
+      const list = await new Promise((resolve, reject) => {
+        sftp.readdir(dir, (err, l) => (err ? reject(err) : resolve(l)));
+      });
+      for (const f of list) {
+        if (f.attrs.isDirectory()) await countFiles(path.posix.join(dir, f.filename));
+        else if (f.attrs.isFile()) total++;
+      }
+    };
+    await countFiles(remoteDir);
+    const counter = { done: 0, total, bytes: 0, failed: [] };
+    await downloadDirRec(id, sftp, remoteDir, localDir, counter);
+    return { ok: true, ...counter };
+  } catch (err) {
+    resetSftp(id);
+    throw err;
+  }
+});
+
 ipcMain.handle('fs:upload', async (e, id, localPath, remotePath) => {
   try {
     const sftp = await getSftp(id);

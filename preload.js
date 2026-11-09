@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('api', {
   fsDownload: (id, remotePath, localPath) => ipcRenderer.invoke('fs:download', id, remotePath, localPath),
   fsUpload: (id, localPath, remotePath) => ipcRenderer.invoke('fs:upload', id, localPath, remotePath),
   chooseDownloadPath: (name) => ipcRenderer.invoke('download:choose', name),
+  chooseDownloadDir: (name) => ipcRenderer.invoke('dir:choose', name),
+  fsDownloadDir: (id, remoteDir, localDir) => ipcRenderer.invoke('fs:downloadDir', id, remoteDir, localDir),
   onFsProgress: (cb) => ipcRenderer.on('fs:progress', (e, id, info) => cb(id, info)),
   getPathForFile: (file) => webUtils.getPathForFile(file),
 });
