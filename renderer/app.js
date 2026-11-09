@@ -120,7 +120,7 @@ function initThemeSelect() {
 function currentTheme() { return THEMES[$('#theme-select').value]; }
 
 // ------------------------------------------------- 侧边栏文件浏览器 (SFTP)
-const fileTree = { root: null, selected: null };
+const fileTree = { root: null, selected: null, tabId: null };
 
 function activeSshTab() {
   const tab = tabs.find((t) => t.id === activeTabId);
@@ -164,17 +164,21 @@ async function initFileBrowser() {
   }
   $('#files-hint').classList.add('hidden');
   $('#files-body').classList.remove('hidden');
-  if (!fileTree.root) {
+  // 切换了标签页时重置文件树，避免拿旧服务器路径请求新连接
+  if (fileTree.tabId !== tab.id || fileTree.root === null) {
+    fileTree.root = null;
+    fileTree.selected = null;
     let home;
     try {
       home = await window.api.fsHome(tab.id);
     } catch (err) {
       showToast('获取主目录失败: ' + err.message);
+      fileTree.tabId = null;
       return;
     }
     fileTree.root = makeDirNode(home, home);
     fileTree.root.expanded = true;
-    fileTree.selected = null;
+    fileTree.tabId = tab.id;
   }
   $('#f-path').value = fileTree.root.path;
   await ensureChildren(fileTree.root);
@@ -258,7 +262,6 @@ function makeTreeRow(node, depth) {
     e.stopPropagation();
     fileTree.selected = node;
     renderTree();
-    updateDownloadBtn();
     showFileMenu(e, node);
   });
 
