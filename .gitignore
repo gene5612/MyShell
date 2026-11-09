@@ -1,0 +1,34 @@
+# 依赖
+node_modules/
+
+# 打包产物
+dist/
+*.exe
+*.nsis.7z
+*.blockmap
+
+# 构建日志
+build*.log
+diag-*.log
+portable-run.log
+*.log
+
+# 会话日志
+logs/
+
+# 运行时数据（含加密后的会话，不入库）
+sessions.json
+
+# 临时测试脚本
+test-*.js
+*-probe.txt
+
+# 环境与编辑器
+.env
+.idea/
+.vscode/
+*.swp
+
+# 系统文件
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+  <title>MyShell</title>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 顶栏 -->
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo">&gt;_</span>
+      <span class="app-name">MyShell</span>
+    </div>
+    <div class="toolbar">
+      <button id="btn-new-local" title="新建本地终端 (Ctrl+T)">+ 本地终端</button>
+      <button id="btn-new-ssh" title="快速 SSH 连接">+ SSH 连接</button>
+      <button id="btn-toggle-sidebar" title="会话管理器">会话</button>
+      <button id="btn-toggle-quickbar" title="快捷命令栏">快捷命令</button>
+      <button id="btn-toggle-monitor" title="服务器资源监控">监控</button>
+      <select id="theme-select" title="配色主题"></select>
+    </div>
+  </header>
+
+  <div id="main">
+    <!-- 侧边栏：会话管理 -->
+    <aside id="sidebar" class="hidden">
+      <div class="sidebar-tabs">
+        <button id="stab-sessions" class="active">会话</button>
+        <button id="stab-files">文件</button>
+      </div>
+      <div id="pane-sessions" class="sidebar-pane">
+        <div class="sidebar-head">
+          <div class="sidebar-actions">
+            <button id="btn-session-add" title="新建会话">＋</button>
+            <button id="btn-dir-add" title="新建目录">📁＋</button>
+            <button id="btn-session-import" title="导入会话 JSON">导入</button>
+            <button id="btn-session-export" title="导出会话 JSON">导出</button>
+          </div>
+        </div>
+        <ul id="session-list"></ul>
+      </div>
+      <div id="pane-files" class="sidebar-pane hidden">
+        <div id="files-hint" class="empty-hint">请先连接一个 SSH 会话，再查看远程文件。</div>
+        <div id="files-body" class="hidden">
+          <div class="files-toolbar">
+            <button id="f-up" title="上级目录">⬆</button>
+            <input id="f-path" placeholder="/root" />
+            <button id="f-go" title="跳转">前往</button>
+            <button id="f-refresh" title="刷新">⟳</button>
+          </div>
+          <div id="file-tree"></div>
+        </div>
+      </div>
+    </aside>
+
+    <div id="sidebar-resizer" title="拖动调整会话面板宽度"></div>
+
+    <div id="terminal-area">
+      <!-- 标签栏 -->
+      <div id="tabbar"></div>
+
+      <!-- 终端容器 -->
+      <div id="term-container"></div>
+
+      <!-- 快捷命令栏 -->
+      <div id="quickbar" class="hidden">
+        <span class="quickbar-title">快捷命令:</span>
+        <div id="quick-commands"></div>
+        <input id="quick-input" placeholder="新命令，如: tail -f /var/log/syslog" />
+        <button id="quick-add">添加</button>
+      </div>
+
+      <!-- 批量命令栏 -->
+      <div id="batch-bar">
+        <span class="batch-label">批量发送</span>
+        <input id="batch-input" placeholder="输入命令，回车发送到所有已连接终端" />
+        <span id="batch-count" class="batch-count"></span>
+        <button id="batch-send" title="发送到所有已连接终端">发送全部</button>
+      </div>
+
+      <!-- 状态栏 -->
+      <footer id="statusbar">
+        <span id="status-conn">就绪</span>
+        <span id="status-log" class="hidden">● 日志记录中</span>
+        <span id="status-size"></span>
+      </footer>
+    </div>
+
+    <!-- 右侧资源监控面板 -->
+    <div id="mon-resizer" class="hidden"></div>
+    <aside id="monitor-panel" class="hidden">
+      <div class="mon-head">
+        <span>资源监控</span>
+        <button id="mon-close" title="关闭监控">×</button>
+      </div>
+      <div class="mon-body">
+        <div class="mon-section">
+          <div class="mon-label"><span>CPU</span><span id="mon-cpu-val">--</span></div>
+          <div class="mon-bar"><div id="mon-cpu-bar" class="mon-bar-fill"></div></div>
+        </div>
+        <div class="mon-section">
+          <div class="mon-label"><span>内存</span><span id="mon-mem-val">--</span></div>
+          <div class="mon-bar"><div id="mon-mem-bar" class="mon-bar-fill"></div></div>
+        </div>
+        <div class="mon-section">
+          <div class="mon-label"><span>网络流量（每秒采样 / 最近 2 分钟）</span></div>
+          <select id="mon-nic" title="选择网卡">
+            <option value="all">汇总（所有网卡）</option>
+          </select>
+          <div class="mon-net">
+            <span class="net-legend"><i class="lg-rx"></i>↓ <span id="mon-net-rx">--</span></span>
+            <span class="net-sep">|</span>
+            <span class="net-legend"><i class="lg-tx"></i>↑ <span id="mon-net-tx">--</span></span>
+          </div>
+          <canvas id="mon-net-chart" height="72"></canvas>
+        </div>
+        <div class="mon-section">
+          <div class="mon-label"><span>CPU 占用 TOP5</span></div>
+          <ul id="mon-top-proc" class="mon-top"></ul>
+        </div>
+        <div class="mon-section">
+          <div class="mon-label"><span>逻辑分区</span></div>
+          <ul id="mon-disks"></ul>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 会话编辑弹窗 -->
+  <div id="modal-overlay" class="hidden">
+    <div id="session-modal">
+      <h2 id="modal-title">新建 SSH 会话</h2>
+      <form id="session-form">
+        <label>会话名称 <input name="name" required placeholder="如: 生产服务器" /></label>
+        <label>所属目录 <input name="dir" list="dir-list" placeholder="留空为未分组，可拖拽调整" /></label>
+        <datalist id="dir-list"></datalist>
+        <label>主机 <input name="host" placeholder="留空则为本地终端" /></label>
+        <label>端口 <input name="port" type="number" value="22" /></label>
+        <label>用户名 <input name="username" placeholder="root" /></label>
+        <label>认证方式
+          <select name="authType">
+            <option value="password">密码</option>
+            <option value="privateKey">私钥</option>
+          </select>
+        </label>
+        <label class="field-password">密码 <input name="password" type="password" /></label>
+        <label class="field-privateKey hidden">私钥路径
+          <div class="row">
+            <input name="privateKeyPath" placeholder="C:\Users\you\.ssh\id_rsa" />
+            <button type="button" id="btn-browse-key">浏览</button>
+          </div>
+        </label>
+        <label>启动命令 <input name="startupCommand" placeholder="连接后自动执行（可选）" /></label>
+        <label class="checkbox">
+          <input type="checkbox" name="autoLog" /> 连接后自动记录日志
+        </label>
+        <div class="modal-actions">
+          <button type="submit" class="primary">保存</button>
+          <button type="button" id="btn-connect-now">保存并连接</button>
+          <button type="button" class="muted" id="btn-modal-cancel">取消</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 目录编辑弹窗 -->
+  <div id="dir-modal-overlay" class="hidden">
+    <div id="session-modal">
+      <h2 id="dir-modal-title">新建目录</h2>
+      <form id="dir-form">
+        <label>目录名称 <input name="dirname" required placeholder="如: 生产环境" /></label>
+        <div class="modal-actions">
+          <button type="submit" class="primary">保存</button>
+          <button type="button" class="muted" id="btn-dir-cancel">取消</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 文件右键菜单 -->
+  <div id="file-ctx-menu" class="hidden">
+    <div class="ctx-item" data-act="download">下载到本地</div>
+  </div>
+
+  <!-- 轻提示 -->
+  <div id="toast" class="hidden"></div>
+
+  <!-- 右键菜单 -->
+  <div id="ctx-menu" class="hidden">
+    <div class="ctx-item" data-act="copy">复制</div>
+    <div class="ctx-item" data-act="paste">粘贴</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" data-act="selectAll">全选</div>
+    <div class="ctx-item" data-act="clear">清屏</div>
+  </div>
+
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
