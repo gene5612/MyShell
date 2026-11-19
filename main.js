@@ -91,12 +91,13 @@ ipcMain.handle('backend:start-local', (e, id, config = {}) => {
 // ------------------------------------------------------- IPC: SSH
 ipcMain.handle('backend:start-ssh', (e, id, config = {}) => {
   const conn = new Client();
-  const store = { type: 'ssh', conn, stream: null, logStream: null };
+  // 记录最新终端尺寸: 连接建立期间收到的 resize 也要更新, 避免 vim 等全屏程序用过期尺寸
+  const store = { type: 'ssh', conn, stream: null, logStream: null, cols: config.cols || 80, rows: config.rows || 24 };
   backends.set(id, store);
 
   conn.on('ready', () => {
     conn.shell(
-      { term: 'xterm-256color', cols: config.cols || 80, rows: config.rows || 24 },
+      { term: 'xterm-256color', cols: store.cols, rows: store.rows },
       (err, stream) => {
         if (err) {
           emit('backend:error', id, err.message);
@@ -104,6 +105,8 @@ ipcMain.handle('backend:start-ssh', (e, id, config = {}) => {
           return;
         }
         store.stream = stream;
+        // stream 建立前可能又收到新尺寸, 立即同步一次
+        try { stream.setWindow(store.rows, store.cols, null, null); } catch (_) {}
         stream.on('data', (d) => {
           trackCwd(id, d);
           emitData(id, d);
@@ -175,6 +178,10 @@ ipcMain.on('backend:input', (e, id, data) => {
 ipcMain.on('backend:resize', (e, id, cols, rows) => {
   const b = backends.get(id);
   if (!b) return;
+  if (typeof cols === 'number' && typeof rows === 'number') {
+    b.cols = cols;
+    b.rows = rows;
+  }
   try {
     if (b.type === 'pty') b.proc.resize(cols, rows);
     else if (b.stream) b.stream.setWindow(rows, cols, null, null);

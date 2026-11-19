@@ -1384,6 +1384,14 @@ window.api.onReady((id) => {
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return;
   tab.ready = true;
+  // 就绪后重新校准尺寸, 避免 vim 等全屏程序使用连接期间的过期行列数
+  requestAnimationFrame(() => {
+    try {
+      tab.fit.fit();
+      window.api.resize(tab.id, tab.term.cols, tab.term.rows);
+      if (id === activeTabId) updateSizeStatus();
+    } catch (_) { /* ignore */ }
+  });
   if (tab.session.autoLog) autoStartLog(tab);
   // 新会话就绪后，若监控面板打开且该会话是当前标签，切换监控目标
   if (monPanelOpen && id === activeTabId) {
